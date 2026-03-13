@@ -42,8 +42,6 @@ public class SystemStatusService {
     private static final int SYS_INDEX = 4;
     private static final int IDLE_INDEX = 11;
 
-    private static final List<String> MOUNT_POINTS = List.of("/", "/srv", "/mnt/backup");
-
     private static final Logger log = LoggerFactory.getLogger(SystemStatusService.class);
 
 
@@ -74,41 +72,47 @@ public class SystemStatusService {
 
 
     public NvmeStatusGto getNvme()throws IOException, InterruptedException{
-        var res = CommandRunner.run(List.of("sudo", "-n", "/usr/sbin/nvme", "smart-log", "/dev/nvme0n1"), Duration.ofSeconds(5));
-        if (res.timedOut()) throw new RuntimeException("nvme timed out");
-        if (res.exitCode() != 0) {
-            throw new RuntimeException("nvme failed: " + res.stderr());
+        try {
+            var res = CommandRunner.run(List.of("sudo", "-n", "/usr/sbin/nvme", "smart-log", "/dev/nvme0n1"), Duration.ofSeconds(5));
+            if (res.timedOut()) throw new RuntimeException("nvme timed out");
+            if (res.exitCode() != 0) {
+                throw new RuntimeException("nvme failed: " + res.stderr());
+            }
+            double nvmeTempC = 0;
+            double percentageWear = 0;
+            int criticalWarning = 0;
+            for (String line : res.stdout().lines().filter(l -> l.contains("temperature") || l.contains("percentage_used") || l.contains("critical_warning")).toList()){
+                Matcher percentMatcher = NVME_PERCENTAGE_PATTERN.matcher(line);
+                if (percentMatcher.find()){
+                    try{
+                        percentageWear = Double.parseDouble(percentMatcher.group(1));
+                    } catch(NumberFormatException e){
+                        //Log error
+                    }
+                }
+                Matcher warningMatcher = NVME_WARNING_PATTERN.matcher(line);
+                if (warningMatcher.find()){
+                    try{
+                        criticalWarning = Integer.parseInt(warningMatcher.group(1));                
+                    } catch(NumberFormatException e){
+                        //Log error
+                    }
+                }
+                Matcher tempMatcher = NVME_TEMP_PATTERN.matcher(line);
+                if (tempMatcher.find()){
+                    try{
+                        nvmeTempC = Double.parseDouble(tempMatcher.group(1));                
+                    } catch(NumberFormatException e){
+                        log.error("getNvme() failed", e);
+                    }
+                }
+            }
+            return new NvmeStatusGto(nvmeTempC, percentageWear, criticalWarning);
+
+        }catch (Exception e){
+            log.warn("getNvme() ikke tilgjengelig: {}", e.getMessage());
+            return new NvmeStatusGto(0,0,0);
         }
-        double nvmeTempC = 0;
-        double percentageWear = 0;
-        int criticalWarning = 0;
-        for (String line : res.stdout().lines().filter(l -> l.contains("temperature") || l.contains("percentage_used") || l.contains("critical_warning")).toList()){
-            Matcher percentMatcher = NVME_PERCENTAGE_PATTERN.matcher(line);
-            if (percentMatcher.find()){
-                try{
-                    percentageWear = Double.parseDouble(percentMatcher.group(1));
-                } catch(NumberFormatException e){
-                    //Log error
-                }
-            }
-            Matcher warningMatcher = NVME_WARNING_PATTERN.matcher(line);
-            if (warningMatcher.find()){
-                try{
-                    criticalWarning = Integer.parseInt(warningMatcher.group(1));                
-                } catch(NumberFormatException e){
-                    //Log error
-                }
-            }
-            Matcher tempMatcher = NVME_TEMP_PATTERN.matcher(line);
-            if (tempMatcher.find()){
-                try{
-                    nvmeTempC = Double.parseDouble(tempMatcher.group(1));                
-                } catch(NumberFormatException e){
-                    log.error("getNvme() failed", e);
-                }
-            }
-        }
-        return new NvmeStatusGto(nvmeTempC, percentageWear, criticalWarning);
     }
 
     public CpuStatusGto getCpu() throws IOException, InterruptedException{
@@ -159,7 +163,7 @@ public class SystemStatusService {
     public List<DiskStatusGto> getDisks() throws IOException{
         List<DiskStatusGto> disks = new ArrayList<>();
 
-        for(String path : MOUNT_POINTS){
+        for(String path : getMountPoints()){
             try{
                 FileStore store = Files.getFileStore(Path.of(path));
 
@@ -206,5 +210,14 @@ public class SystemStatusService {
             }
         }
         return containers;
+    }
+
+    private List<String> getMountPoints() throws IOException {
+        return Files.readAllLines(Path.of("/proc/mounts")).stream()
+        .map(line -> line.split("\\s+"))
+        .filter(parts -> parts.length >= 3)
+        .filter(parts -> parts[2].matches("ext4|xfs|btrfs|vfat|ntfs"))
+        .map(parts -> parts[1])
+        .toList();
     }
 }
