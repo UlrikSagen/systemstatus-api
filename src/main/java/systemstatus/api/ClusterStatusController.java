@@ -10,18 +10,14 @@ import systemstatus.service.*;
 public class ClusterStatusController {
 
     private final ClusterStatusService clusterService;
-    private final SystemStatusService service;
 
 
-    public ClusterStatusController(ClusterStatusService clusterService, SystemStatusService service){
+    public ClusterStatusController(ClusterStatusService clusterService){
         this.clusterService = clusterService;
-        this.service = service;
     }    
 
     @GetMapping("/cluster/status")
     public ClusterStatusGto clusteStatus() throws Exception{
         return clusterService.clusterStatus();
     }
-
-
 }
