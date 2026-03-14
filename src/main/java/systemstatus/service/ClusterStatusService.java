@@ -63,6 +63,6 @@ public class ClusterStatusService {
             throw new RuntimeException("feilet: " + res.statusCode() + res.body() + "\n");
         }
         SystemStatusGto systemStatus = objectMapper.readValue(res.body(), SystemStatusGto.class);
-        return new NodeStatusGto(node.split(":")[0], systemStatus, true);
+        return new NodeStatusGto(node, systemStatus, true);
     }
 }
